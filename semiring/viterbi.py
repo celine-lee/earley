@@ -118,15 +118,8 @@ class ViterbiSemiring(Semiring):
 
 
 def viterbi_matmul(mat1, mat2):
-    assert mat1.shape[-1] == mat2.shape[0]
-    assert len(mat1.shape) in {
-        1,
-        2,
-    }, "matmul of higher-dimensional (>2) matrices not supported yet."
-    assert len(mat2.shape) in {
-        1,
-        2,
-    }, "matmul of higher-dimensional (>2) matrices not supported yet."
+    if mat1.shape[-1] != mat2.shape[0]: assert mat1.shape[-1] == mat2.shape[1]
+    else: assert mat1.shape[-1] == mat2.shape[0]
 
     m1 = mat1
     if mat1.is_sparse:
@@ -141,4 +134,16 @@ def viterbi_matmul(mat1, mat2):
         return torch.max(m1 * m2, 0)[0]
     if len(m2.shape) == 1:
         return torch.max(m1 * m2, 1)[0]
-    return torch.max(m1[..., None] * m2[None, ...], 1)[0]
+    if len(m1.shape) == len(m2.shape):
+        if len(m1.shape) == 2: return torch.max(m1[..., None] * m2[None, ...], 1)[0]
+        else: return torch.max(m1.reshape(mat1.shape[0],mat1.shape[1],mat1.shape[2],1) * m2.reshape(mat2.shape[0],1,mat2.shape[1],mat2.shape[2]), 2)[0]
+
+    if len(m2.shape) == 2:
+        assert len(m1.shape) == 3
+        return torch.max(m1.reshape(*mat1.shape,1) * m2.reshape(1,1,*mat2.shape), 2)[0]
+    if len(m1.shape) == 2:
+        assert len(m2.shape) == 3
+        return torch.max(m1.reshape(*mat1.shape,1,1) * m2.reshape(1,*mat2.shape), 2)[0]
+
+
+

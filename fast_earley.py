@@ -135,44 +135,46 @@ class EarleySupport:
 
 
 def earley_semiring_parallelize(
-    input: List[Terminal],
+    inputs: List[List[Terminal]],
     support: EarleySupport,
     add: Callable[[torch.Tensor, torch.Tensor], torch.Tensor],
     matmul: Callable[[torch.Tensor, torch.Tensor], torch.Tensor],
     mul: Callable[[torch.Tensor, torch.Tensor], torch.Tensor],
     add_id: float,
 ):
-    input.append(Terminal(Symbol(-1)))
-    N = len(input)
+    inputs = [inp+[Terminal(Symbol(-1))] for inp in inputs]
+    B = len(inputs)
+    N = max(len(inp) for inp in inputs)
 
     # R^NxNx|V|; entry [end_pos, origin, dotstate] is the score of Earley item [origin, dotstate, end_pos]
-    dp_scores = torch.ones((N, N, len(support.V))) * add_id
+    dp_scores = torch.ones((B, N, N, len(support.V))) * add_id
 
     # PREDICT. Since all items with the same origin and end_pos are generated from prediction steps, do all predictions in advance.
     for index in range(N):
-        dp_scores[index, index] = support.P
+        dp_scores[:, index, index] = support.P
 
     # Process items according to the partial order. An item is processed either by being COMPLETEd or SCANned.
     for end_pos in range(N):
         for split in reversed(range(end_pos)):
             # COMPLETE. For any complete item over range `[split, end_pos]`, `mul` its score with any parent item with end index `split` and `add` result to new joint item.
-            # R^Nx|V| score of every parent item [origin (free), dotstate, split]
-            parent_scores = dp_scores[split]
+            # R^BxNx|V| score of every parent item [origin (free), dotstate, split]
+            parent_scores = dp_scores[:, split]
 
-            # R^|V| combined score of all complete children in `[split, end_pos]`, combined across and indexed by shared parent item
-            scores_by_parent = matmul(support.E, dp_scores[end_pos, split])
-            # R^|N|x|V| combined score of parent item and all of its complete children, resulting in new joint item. indexed by parent item
-            parent_all_children_score = mul(parent_scores, scores_by_parent[None, :])
-            # R^|N|x|V| score of new joint item, indexed by joint item
+            # R^Bx|V| combined score of all complete children in `[split, end_pos]`, combined across and indexed by shared parent item
+            scores_by_parent = matmul(dp_scores[:, end_pos, split], support.E.transpose(1,0))
+            # R^Bx|N|x|V| combined score of parent item and all of its complete children, resulting in new joint item. indexed by parent item
+            parent_all_children_score = mul(parent_scores, scores_by_parent[:,None, :])
+            # R^Bx|N|x|V| score of new joint item, indexed by joint item
             joint_item_score = matmul(parent_all_children_score, support.all_T)
 
             # `add` newly processed joint scores to existing scores.
-            dp_scores[end_pos] = add(dp_scores[end_pos], joint_item_score)
+            dp_scores[:, end_pos] = add(dp_scores[:, end_pos], joint_item_score)
 
         # SCAN. For items whose next symbol is the current symbol, copy scores into next time step with dot advanced (scanned).
         if end_pos < N - 1:
-            new_scan_scores = matmul(dp_scores[end_pos], support.T[input[end_pos]])
-            dp_scores[end_pos + 1] = add(dp_scores[end_pos + 1], new_scan_scores)
+            specific_transition_matrix = torch.stack([support.T[inp[end_pos]] for inp in inputs], dim=0)
+            new_scan_scores = matmul(dp_scores[:, end_pos], specific_transition_matrix)
+            dp_scores[:, end_pos + 1] = add(dp_scores[:, end_pos + 1], new_scan_scores)
 
     # Return the score of the completed root rule.
-    return dp_scores[N - 1, 0, support.V[(support.root_rule.uid, DotPosition(1))]]
+    return [dp_scores[b, len(inp)-1, 0, support.V[(support.root_rule.uid, DotPosition(1))]] for b, inp in enumerate(inputs)]

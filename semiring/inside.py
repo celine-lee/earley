@@ -63,15 +63,8 @@ def logspace_matmul(mat1, mat2):
     raise NotImplementedError
 
 def inside_matmul(mat1, mat2, matmul_op=lambda m1,m2: m1 @ m2):
-    assert mat1.shape[-1] == mat2.shape[0]
-    assert len(mat1.shape) in {
-        1,
-        2,
-    }, "matmul of higher-dimensional (>2) matrices not supported yet."
-    assert len(mat2.shape) in {
-        1,
-        2,
-    }, "matmul of higher-dimensional (>2) matrices not supported yet."
+    if mat1.shape[-1] != mat2.shape[0]: assert mat1.shape[-1] == mat2.shape[1]
+    else: assert mat1.shape[-1] == mat2.shape[0]
 
     if not (mat1.is_sparse) and not (mat2.is_sparse):
         return matmul_op(mat1, mat2)
@@ -87,4 +80,21 @@ def inside_matmul(mat1, mat2, matmul_op=lambda m1,m2: m1 @ m2):
     if len(mat2.shape) == 1:
         return matmul_op(mat2, mat1.transpose(1, 0))
 
-    return matmul_op(mat2.transpose(1, 0), mat1.transpose(1, 0)).transpose(1, 0)
+    if len(mat1.shape) == len(mat2.shape):
+        if len(mat1.shape) == 2: return matmul_op(mat2.transpose(1, 0), mat1.transpose(1, 0)).transpose(1, 0)
+        # else: return matmul_op(mat2.transpose(2, 1), mat1.transpose(2, 1)).transpose(2, 1)
+    
+    m1 = mat1
+    if mat1.is_sparse:
+        m1 = mat1.to_dense()
+    m2 = mat2
+    if mat2.is_sparse:
+        m2 = mat2.to_dense()
+    return m1 @ m2
+
+
+
+
+
+
+

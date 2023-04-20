@@ -28,8 +28,6 @@ from fast_earley import EarleySupport, earley_semiring_parallelize
 
 
 def simple_grammar_nonunary() -> Tuple[ProbabilisticGrammar, Tokenizer]:
-    dirname = os.path.dirname(__file__)
-    filename = os.path.join(dirname, "../grammar_induction/models/tokenizer")
 
     grammar: Mapping[
         str,
@@ -142,8 +140,6 @@ def simple_grammar_nonunary() -> Tuple[ProbabilisticGrammar, Tokenizer]:
 
 
 def simple_grammar_nonunary_logprob() -> Tuple[ProbabilisticGrammar, Tokenizer]:
-    dirname = os.path.dirname(__file__)
-    filename = os.path.join(dirname, "../grammar_induction/models/tokenizer")
 
     grammar: Mapping[
         str,
@@ -364,7 +360,7 @@ def test_earley_inside_semiring(num_src_to_check=50):
 ########################## PARALLEL PROCESSING ##########################
 
 
-def test_earley_parallelized_inside(num_src_to_check=50):
+def test_earley_parallelized_inside(num_src_to_check=50, B=8):
     p_grammar, tokenizer = simple_grammar_nonunary()
     # p_grammar, tokenizer = simple_grammar_nonunary_logprob()
 
@@ -394,30 +390,39 @@ def test_earley_parallelized_inside(num_src_to_check=50):
             strings_to_check[src] = {(d, score)}
     
     times = []
+    batch, batch_truths = [], []
     for src, derivs in strings_to_check.items():
         src_tok = tokenizer.convert_to_tokens(src.split())
         total_deriv_score = inside_zero
         for d, score in derivs:
             total_deriv_score = inside_add(total_deriv_score, torch.tensor(score))
-        start = time.time()
-        inside_value = earley_semiring_parallelize(
-            src_tok,
-            support,
-            inside_add,
-            inside_matmul,
-            inside_mul,
-            inside_zero,
-        )
-        times.append(time.time() - start)
-
-        assert np.isclose(
-            total_deriv_score, inside_value
-        ), f"Expected a score of {total_deriv_score} but got {inside_value}"
+        batch.append(src_tok)
+        batch_truths.append(total_deriv_score)
+        if len(batch) == B:
+            start = time.time()
+            inside_values = earley_semiring_parallelize(
+                # src_tok,
+                batch,
+                support,
+                inside_add,
+                inside_matmul,
+                inside_mul,
+                inside_zero,
+            )
+            times.append(time.time() - start)
+            
+            for truth_inside, pred_inside in zip(batch_truths, inside_values):
+                assert np.isclose(
+                    truth_inside, pred_inside
+                ), f"Expected a score of {truth_inside} but got {pred_inside}"
+            
+            batch = []
+            batch_truths = []
 
     print("====== passed inside parallelize =====")
     return sum(times) / len(times)
 
-def test_earley_parallelized_viterbi(run_times=25):
+def test_earley_parallelized_viterbi(run_times=25, B=8):
     p_grammar, tokenizer = simple_grammar_nonunary()
     # p_grammar, tokenizer = simple_grammar_nonunary_logprob()
 
@@ -435,24 +440,31 @@ def test_earley_parallelized_viterbi(run_times=25):
 
     already_parsed = set()
     times = []
+    batch, batch_truths = [], []
     for (d, score) in p_grammar.top_down_generator(in_logspace=False):
         src = d.get_produced_src_string(tokenizer)
         if src in already_parsed:
             continue
         src_tok = tokenizer.convert_to_tokens(src.split())
-        start = time.time()
-        viterbi_score = earley_semiring_parallelize(
-            src_tok,
-            support,
-            viterbi_add,
-            viterbi_matmul,
-            viterbi_mul,
-            viterbi_zero,
-        )
-        times.append(time.time() - start)
-        assert np.isclose(
-            score, viterbi_score
-        ), f"Expected a score of {score} but got {viterbi_score}"
+        batch.append(src_tok)
+        batch_truths.append(score)
+        if len(batch) == B:
+            start = time.time()
+            viterbi_scores = earley_semiring_parallelize(
+                # src_tok,
+                batch,
+                support,
+                viterbi_add,
+                viterbi_matmul,
+                viterbi_mul,
+                viterbi_zero,
+            )
+            times.append(time.time() - start)
+            for truth_viterbi, pred_viterbi in zip(batch_truths, viterbi_scores):
+                assert np.isclose(
+                    truth_viterbi, pred_viterbi
+                ), f"Expected a score of {truth_viterbi} but got {pred_viterbi}"
+            batch, batch_truths = [], []
         already_parsed.add(src)
         run_times -= 1
         if run_times < 0:
