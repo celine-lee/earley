@@ -14,7 +14,7 @@ from grammar.grammar import (
 )
 from grammar.tokenizer import Tokenizer
 
-from earley_parsing.earley import DotPosition
+from earley import DotPosition
 
 DotStateId = NewType("DotStateId", int)
 

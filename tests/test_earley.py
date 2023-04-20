@@ -3,11 +3,12 @@ import os
 import random
 import numpy as np
 import torch
+import time
 
 from collections.abc import Mapping, Sequence, MutableMapping
 from typing import Tuple, Dict, List, Set, Union
 
-from earley_parsing.earley import (
+from earley import (
     earley_recognition,
     earley_viterbi,
     earley_inside,
@@ -23,7 +24,7 @@ from grammar.grammar import (
     Score,
 )
 from grammar.tokenizer import Tokenizer
-from earley_parsing.fast_earley import EarleySupport, earley_semiring_parallelize
+from fast_earley import EarleySupport, earley_semiring_parallelize
 
 
 def simple_grammar_nonunary() -> Tuple[ProbabilisticGrammar, Tokenizer]:
@@ -254,13 +255,12 @@ def simple_grammar_nonunary_logprob() -> Tuple[ProbabilisticGrammar, Tokenizer]:
 ########################## SERIAL PROCESSING ##########################
 
 
-def test_earley_bool_semiring():
+def test_earley_bool_semiring(length=4):
     p_grammar, tokenizer = simple_grammar_nonunary_logprob()
     grammar = p_grammar.grammar
 
     random_strings = set()
 
-    length = 4
     for l in range(1, length + 1):
         for t in itertools.product(grammar.src_terminals, repeat=l):
             random_strings.add(tokenizer.decode(list(t)))
@@ -269,10 +269,13 @@ def test_earley_bool_semiring():
     for d in grammar.derivation_generator(grammar.root_nt, length):
         parseable.add(d.get_produced_src_string(tokenizer))
     should_fail = random_strings - parseable
-
+    
+    times = []
     for src in parseable:
         src_tok = tokenizer.convert_to_tokens(src.split())
+        start = time.time()
         was_parsed = earley_recognition(p_grammar, src_tok)
+        times.append(time.time() - start)
         assert (
             was_parsed.get_score()
         ), f"{src} should be parseable by the grammar but it is not."
@@ -280,24 +283,28 @@ def test_earley_bool_semiring():
 
     for src in should_fail:
         src_tok = tokenizer.convert_to_tokens(src.split())
+        start = time.time()
         was_parsed = earley_recognition(p_grammar, src_tok)
+        times.append(time.time() - start)
         assert (
             not was_parsed.get_score()
         ), f"{src} should not be parseable by the grammar but it is."
     print("====== passed should-not-be-parseable =====")
+    return sum(times) / len(times)
 
-
-def test_earley_viterbi_semiring():
+def test_earley_viterbi_semiring(run_times=25):
     p_grammar, tokenizer = simple_grammar_nonunary_logprob()
 
-    run_times = 25
+    times = []
     already_parsed = set()
     for (d, score) in p_grammar.top_down_generator():
         src = d.get_produced_src_string(tokenizer)
         if src in already_parsed:
             continue
         src_tok = tokenizer.convert_to_tokens(src.split())
+        start = time.time()
         earley_result = earley_viterbi(p_grammar, src_tok)
+        times.append(time.time() - start)
         assert np.isclose(
             score, earley_result.get_score()[0]
         ), f"Expected a score of {score} but got {earley_result.get_score()[0]}"
@@ -314,15 +321,15 @@ def test_earley_viterbi_semiring():
         if run_times < 0:
             break
     print("====== passed viterbi =====")
+    return sum(times) / len(times)
 
 
-def test_earley_inside_semiring():
+def test_earley_inside_semiring(num_src_to_check=50):
     p_grammar, tokenizer = simple_grammar_nonunary_logprob()
 
-    num_src_to_check = 50
     strings_to_check: Dict[str, Set[Tuple[Derivation, Score]]] = {}
 
-    for (d, score) in p_grammar.top_down_generator(200):
+    for (d, score) in p_grammar.top_down_generator(num_src_to_check*4):
         src = d.get_produced_src_string(tokenizer)
         if len(strings_to_check) > num_src_to_check and src not in strings_to_check:
             continue
@@ -330,25 +337,29 @@ def test_earley_inside_semiring():
             strings_to_check[src].add((d, score))
         else:
             strings_to_check[src] = {(d, score)}
-
+    
+    times = []
     for src, derivs in strings_to_check.items():
         src_tok = tokenizer.convert_to_tokens(src.split())
         total_deriv_score = np.log(1e-10)
         for d in derivs:
             total_deriv_score = np.logaddexp(total_deriv_score, d[1])
+        start = time.time()
         earley_result = earley_inside(p_grammar, src_tok)
+        times.append(time.time() - start)
 
         assert np.isclose(
             total_deriv_score, earley_result.get_score()
         ), f"Expected a score of {total_deriv_score} but got {earley_result.get_score()}"
 
     print("====== passed inside =====")
+    return sum(times) / len(times)
 
 
 ########################## PARALLEL PROCESSING ##########################
 
 
-def test_earley_parallelized_inside():
+def test_earley_parallelized_inside(num_src_to_check=50):
     p_grammar, tokenizer = simple_grammar_nonunary()
 
     inside_add = torch.add
@@ -359,11 +370,10 @@ def test_earley_parallelized_inside():
         p_grammar, tokenizer, inside_zero
     )
 
-    num_src_to_check = 50
     strings_to_check: Dict[str, Set[Tuple[Derivation, Score]]] = {}
 
     for (d, score) in p_grammar.top_down_generator(
-        max_num_generated=200, in_logspace=False
+        max_num_generated=num_src_to_check*4, in_logspace=False
     ):
         src = d.get_produced_src_string(tokenizer)
         if len(strings_to_check) > num_src_to_check and src not in strings_to_check:
@@ -372,12 +382,14 @@ def test_earley_parallelized_inside():
             strings_to_check[src].add((d, score))
         else:
             strings_to_check[src] = {(d, score)}
-
+    
+    times = []
     for src, derivs in strings_to_check.items():
         src_tok = tokenizer.convert_to_tokens(src.split())
         total_deriv_score = inside_zero
         for d in derivs:
             total_deriv_score = inside_add(total_deriv_score, d[1])
+        start = time.time()
         inside_value = earley_semiring_parallelize(
             src_tok,
             support,
@@ -386,15 +398,16 @@ def test_earley_parallelized_inside():
             inside_mul,
             inside_zero,
         )
+        times.append(time.time() - start)
 
         assert np.isclose(
             total_deriv_score, inside_value
         ), f"Expected a score of {total_deriv_score} but got {inside_value}"
 
     print("====== passed inside parallelize =====")
+    return sum(times) / len(times)
 
-
-def test_earley_parallelized_viterbi():
+def test_earley_parallelized_viterbi(run_times=25):
     p_grammar, tokenizer = simple_grammar_nonunary()
 
     viterbi_add = torch.maximum
@@ -405,13 +418,14 @@ def test_earley_parallelized_viterbi():
         p_grammar, tokenizer, viterbi_zero
     )
 
-    run_times = 25
     already_parsed = set()
+    times = []
     for (d, score) in p_grammar.top_down_generator(in_logspace=False):
         src = d.get_produced_src_string(tokenizer)
         if src in already_parsed:
             continue
         src_tok = tokenizer.convert_to_tokens(src.split())
+        start = time.time()
         viterbi_score = earley_semiring_parallelize(
             src_tok,
             support,
@@ -420,6 +434,7 @@ def test_earley_parallelized_viterbi():
             viterbi_mul,
             viterbi_zero,
         )
+        times.append(time.time() - start)
         assert np.isclose(
             score, viterbi_score
         ), f"Expected a score of {score} but got {viterbi_score}"
@@ -429,3 +444,4 @@ def test_earley_parallelized_viterbi():
             break
 
     print("====== passed viterbi parallelize =====")
+    return sum(times) / len(times)

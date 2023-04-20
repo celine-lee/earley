@@ -129,7 +129,6 @@ def filter_grammar(
 
 def earley_semiring(semiring: Semiring, input: List[Terminal]) -> Element:
     input.append(Terminal(Symbol(-1)))
-    print("INPUT: ", input)
     N = len(input)
 
     p_grammar = semiring.p_grammar
