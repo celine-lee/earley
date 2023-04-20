@@ -256,7 +256,8 @@ def simple_grammar_nonunary_logprob() -> Tuple[ProbabilisticGrammar, Tokenizer]:
 
 
 def test_earley_bool_semiring(length=4):
-    p_grammar, tokenizer = simple_grammar_nonunary_logprob()
+    # p_grammar, tokenizer = simple_grammar_nonunary_logprob()
+    p_grammar, tokenizer = simple_grammar_nonunary()
     grammar = p_grammar.grammar
 
     random_strings = set()
@@ -294,10 +295,11 @@ def test_earley_bool_semiring(length=4):
 
 def test_earley_viterbi_semiring(run_times=25):
     p_grammar, tokenizer = simple_grammar_nonunary_logprob()
+    # p_grammar, tokenizer = simple_grammar_nonunary()
 
     times = []
     already_parsed = set()
-    for (d, score) in p_grammar.top_down_generator():
+    for (d, score) in p_grammar.top_down_generator(in_logspace=True):
         src = d.get_produced_src_string(tokenizer)
         if src in already_parsed:
             continue
@@ -326,10 +328,13 @@ def test_earley_viterbi_semiring(run_times=25):
 
 def test_earley_inside_semiring(num_src_to_check=50):
     p_grammar, tokenizer = simple_grammar_nonunary_logprob()
+    # p_grammar, tokenizer = simple_grammar_nonunary()
+    semiring_zero = np.log(1e-10)
+    semiring_add = np.logaddexp
 
     strings_to_check: Dict[str, Set[Tuple[Derivation, Score]]] = {}
 
-    for (d, score) in p_grammar.top_down_generator(num_src_to_check*4):
+    for (d, score) in p_grammar.top_down_generator(num_src_to_check*4, in_logspace=True):
         src = d.get_produced_src_string(tokenizer)
         if len(strings_to_check) > num_src_to_check and src not in strings_to_check:
             continue
@@ -341,9 +346,9 @@ def test_earley_inside_semiring(num_src_to_check=50):
     times = []
     for src, derivs in strings_to_check.items():
         src_tok = tokenizer.convert_to_tokens(src.split())
-        total_deriv_score = np.log(1e-10)
+        total_deriv_score = semiring_zero
         for d in derivs:
-            total_deriv_score = np.logaddexp(total_deriv_score, d[1])
+            total_deriv_score = semiring_add(total_deriv_score, d[1])
         start = time.time()
         earley_result = earley_inside(p_grammar, src_tok)
         times.append(time.time() - start)
@@ -361,11 +366,16 @@ def test_earley_inside_semiring(num_src_to_check=50):
 
 def test_earley_parallelized_inside(num_src_to_check=50):
     p_grammar, tokenizer = simple_grammar_nonunary()
+    # p_grammar, tokenizer = simple_grammar_nonunary_logprob()
 
     inside_add = torch.add
     inside_mul = torch.mul
     inside_zero = 0
     inside_one = 1
+    # inside_add = torch.logaddexp
+    # inside_mul = torch.add
+    # inside_zero = torch.tensor(-1e10) # float('-inf')
+    # inside_one = 0
     support = EarleySupport.initialize_parallelization_matrices(
         p_grammar, tokenizer, inside_zero
     )
@@ -387,8 +397,8 @@ def test_earley_parallelized_inside(num_src_to_check=50):
     for src, derivs in strings_to_check.items():
         src_tok = tokenizer.convert_to_tokens(src.split())
         total_deriv_score = inside_zero
-        for d in derivs:
-            total_deriv_score = inside_add(total_deriv_score, d[1])
+        for d, score in derivs:
+            total_deriv_score = inside_add(total_deriv_score, torch.tensor(score))
         start = time.time()
         inside_value = earley_semiring_parallelize(
             src_tok,
@@ -409,11 +419,16 @@ def test_earley_parallelized_inside(num_src_to_check=50):
 
 def test_earley_parallelized_viterbi(run_times=25):
     p_grammar, tokenizer = simple_grammar_nonunary()
+    # p_grammar, tokenizer = simple_grammar_nonunary_logprob()
 
     viterbi_add = torch.maximum
     viterbi_mul = torch.mul
     viterbi_zero = 0
     viterbi_one = 1
+    # viterbi_add = torch.maximum
+    # viterbi_mul = torch.add
+    # viterbi_zero = -1e10
+    # viterbi_one = 0
     support = EarleySupport.initialize_parallelization_matrices(
         p_grammar, tokenizer, viterbi_zero
     )

@@ -28,7 +28,7 @@ bv_inside_simple = test_earley_parallelized_inside(num_src_to_check=50)
 
 
 print('*** Runtimes ***')
-print('Semiring\tGrammar\tSerial\tBV')
-print(f'Bool\t\tsimple_logprob\t{serial_bool_simple:.3f}\tNA')
-print(f'Viterbi\t\tsimple_logprob\t{serial_viterbi_simple:.3f}\t{bv_viterbi_simple:.3f}')
-print(f'Inside\t\tsimple_logprob\t{serial_inside_simple:.3f}\t{bv_inside_simple:.3f}')
+print('Semiring\tGrammar\tSerial(log)\tBV')
+print(f'Bool\t\tsimple\t{serial_bool_simple:.3f}\tNA')
+print(f'Viterbi\t\tsimple\t{serial_viterbi_simple:.3f}\t{bv_viterbi_simple:.3f}')
+print(f'Inside\t\tsimple\t{serial_inside_simple:.3f}\t{bv_inside_simple:.3f}')

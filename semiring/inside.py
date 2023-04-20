@@ -59,8 +59,10 @@ class InsideSemiring(Semiring):
 
 ########################## PARALLELIZED PROCESSING ##########################
 
+def logspace_matmul(mat1, mat2):
+    raise NotImplementedError
 
-def inside_matmul(mat1, mat2):
+def inside_matmul(mat1, mat2, matmul_op=lambda m1,m2: m1 @ m2):
     assert mat1.shape[-1] == mat2.shape[0]
     assert len(mat1.shape) in {
         1,
@@ -72,17 +74,17 @@ def inside_matmul(mat1, mat2):
     }, "matmul of higher-dimensional (>2) matrices not supported yet."
 
     if not (mat1.is_sparse) and not (mat2.is_sparse):
-        return mat1 @ mat2
+        return matmul_op(mat1, mat2)
     elif mat1.is_sparse:
-        return mat1 @ mat2
+        return matmul_op(mat1, mat2)
 
     if len(mat1.shape) == 1:
         if len(mat2.shape) == 1:
-            return mat2 @ mat1
+            return matmul_op(mat2, mat1)
 
-        return mat2.transpose(1, 0) @ mat1
+        return matmul_op(mat2.transpose(1, 0), mat1)
 
     if len(mat2.shape) == 1:
-        return mat2 @ mat1.transpose(1, 0)
+        return matmul_op(mat2, mat1.transpose(1, 0))
 
-    return (mat2.transpose(1, 0) @ mat1.transpose(1, 0)).transpose(1, 0)
+    return matmul_op(mat2.transpose(1, 0), mat1.transpose(1, 0)).transpose(1, 0)
